@@ -1,0 +1,140 @@
+import streamlit as st
+import yt_dlp
+from openai import OpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+import os
+
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+OpenAI.api_key = os.getenv("OPENAI_API_KEY")
+
+# Initialize OpenAI client
+# client = openai.OpenAI()
+client = OpenAI() 
+llm = ChatOpenAI(temperature=0.7)
+
+# Function to download audio and video from YouTube
+def download_youtube(url):
+    """
+    Download both video and audio from a YouTube URL and save as MP3 and MP4 files.
+    """
+    ydl_opts_audio = {
+        'format': 'bestaudio/best',
+        'outtmpl': 'audio.%(ext)s',
+        'postprocessors': [{
+            'key': 'FFmpegExtractAudio',
+            'preferredcodec': 'mp3',
+            'preferredquality': '192',
+        }],
+    }
+
+    ydl_opts_video = {
+        'format': 'bestvideo+bestaudio',
+        'outtmpl': 'video.%(ext)s',
+    }
+
+    with yt_dlp.YoutubeDL(ydl_opts_audio) as ydl:
+        ydl.download([url])
+
+    with yt_dlp.YoutubeDL(ydl_opts_video) as ydl:
+        ydl.download([url])
+
+    return "audio.mp3", "video.mkv"
+
+# Function to transcribe audio
+def transcribe_audio(audio_path):
+    with open(audio_path, "rb") as audio_file:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=audio_file,
+            response_format="text"
+        )
+    return transcript
+
+# Function to generate a spinned article
+def generate_spinned_article(transcription):
+    prompt_template = """
+    Think of yourself as a professional journalist working for a big news websites and write a spinned article of the following transcription within 200 words, keeping the original meaning but changing the wording and sentence structures. Make it more engaging and dynamic, and suitable for publication.
+
+    Transcription:
+    {transcription}
+    """
+    prompt = ChatPromptTemplate.from_template(prompt_template)
+    chain = prompt | llm | StrOutputParser()
+
+    spinned_article = chain.invoke({"transcription": transcription})
+    return spinned_article
+
+# Function to generate title, subtitle, and image
+def generate_title_subtitle_image(article_text):
+    try:
+        # Generate title using GPT-4
+        title_response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are an AI assistant that generates engaging article titles."},
+                      {"role": "user", "content": f"Generate a compelling title for the following article:\n\n{article_text}"}],
+            max_tokens=15
+        )
+        title = title_response.choices[0].message.content.strip()
+
+        # Generate subtitle using GPT-4
+        subtitle_response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are an AI assistant that generates short, engaging article subtitles."},
+                      {"role": "user", "content": f"Generate a concise subtitle that summarizes the following article in one sentence:\n\n{article_text}"}],
+            max_tokens=30
+        )
+        subtitle = subtitle_response.choices[0].message.content.strip()
+
+        # Generate image using DALL·E 3
+        image_response = client.images.generate(
+            model="dall-e-3",
+            prompt=f"Generate an image that visually represents the following article: {article_text}",
+            n=1,
+            size="1024x1024"
+        )
+        image_url = image_response.data[0].url
+
+        return title, subtitle, image_url
+
+    except Exception as e:
+        st.error(f"Error generating content: {e}")
+        return None, None, None
+
+# Streamlit UI
+st.title(" YouTube to Transcription, Article & AI-Generated Image")
+
+# Input field for YouTube URL
+youtube_url = st.text_input("Enter YouTube Video URL", placeholder="Paste the YouTube link here...")
+
+if st.button("Process Video"):
+    if youtube_url:
+        with st.spinner("Downloading video and audio..."):
+            audio_file, video_file = download_youtube(youtube_url)
+
+        with st.spinner("Transcribing audio..."):
+            transcription = transcribe_audio(audio_file)
+
+        with st.spinner("Generating rewritten article..."):
+            spinned_article = generate_spinned_article(transcription)
+
+        with st.spinner("Generating title, subtitle, and image..."):
+            title, subtitle, image_url = generate_title_subtitle_image(spinned_article)
+
+        # Display results
+        st.video(video_file)  # Show video
+        st.subheader(" Transcription")
+        st.text_area("Transcription", transcription, height=200)
+
+        st.subheader(" Title & Subtitle")
+        st.text_area("Title & Subtitle", f"Title: {title}\n\nSubtitle: {subtitle}", height=100)
+
+        st.subheader(" AI-Generated Image")
+        st.image(image_url, caption="Generated by DALL·E")
+
+    else:
+        st.error("Please enter a valid YouTube URL.")
