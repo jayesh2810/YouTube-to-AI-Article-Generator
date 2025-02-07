@@ -8,7 +8,7 @@ This project allows users to download YouTube videos, transcribe audio, and gene
 1. Clone the repository:  
    ```bash
    git clone https://github.com/jayesh2810/YouTube-to-AI-Article-Generator.git
-   cd YT to AI Article Generator
+   cd YouTube-to-AI-Article-Generator
 
 2. Install dependencies:
     ```bash
